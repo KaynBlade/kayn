@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/db_helper.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -9,6 +10,10 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  final DBHelper _dbHelper = DBHelper();
+
+  String _email = '';
+  String _password = '';
 
   @override
   Widget build(BuildContext context) {
@@ -38,11 +43,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 32),
                 TextFormField(
                   decoration: const InputDecoration(
-                    labelText: 'Email / Student ID',
+                    labelText: 'XMUM Email',
                     border: OutlineInputBorder(),
                   ),
                   validator: (val) =>
-                      val!.isEmpty ? 'Please enter your account' : null,
+                      val!.isEmpty ? 'Please enter your register email' : null,
+                  onSaved: (val) => _email = val!.trim(),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -53,6 +59,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   validator: (val) =>
                       val!.isEmpty ? 'Please enter your password' : null,
+                  onSaved: (val) => _password = val!,
                 ),
                 const SizedBox(height: 24),
                 SizedBox(
@@ -63,10 +70,27 @@ class _LoginScreenState extends State<LoginScreen> {
                       backgroundColor: Colors.teal,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: () {
+                    onPressed: () async {
                       if (_formKey.currentState!.validate()) {
-                        // Login successful, navigate to home and clear the navigation stack
-                        Navigator.pushReplacementNamed(context, '/home');
+                        _formKey.currentState!.save();
+
+                        final user = await _dbHelper.loginUser(
+                          _email,
+                          _password,
+                        );
+                        if (!mounted) return;
+
+                        if (user != null) {
+                          Navigator.pushReplacementNamed(context, '/home');
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Invalid credentials! Please register or check details.',
+                              ),
+                            ),
+                          );
+                        }
                       }
                     },
                     child: const Text('Login', style: TextStyle(fontSize: 16)),

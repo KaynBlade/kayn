@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/db_helper.dart';
 import '../models/product_model.dart';
@@ -11,17 +12,25 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final DBHelper _dbHelper = DBHelper();
+  final TextEditingController _searchController = TextEditingController();
 
-  // Function to refresh home screen data
+  String _searchKeyword = '';
+
   void _refreshProducts() {
     setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Campus Second-hand Trading Marketplace'),
+        title: const Text('XMUM Campus Marketplace'),
         actions: [
           IconButton(
             icon: const Icon(Icons.person),
@@ -44,100 +53,180 @@ class _HomeScreenState extends State<HomeScreen> {
           if (index == 2) Navigator.pushNamed(context, '/help');
         },
       ),
-      // Fetch data from local database
-      body: FutureBuilder<List<Product>>(
-        future: _dbHelper.getProducts(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(
-              child: Text('No items listed yet. Be the first to post one!'),
-            );
-          }
-
-          final products = snapshot.data!;
-          return Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: GridView.builder(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                childAspectRatio: 0.8,
-                crossAxisSpacing: 8.0,
-                mainAxisSpacing: 8.0,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 4.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search item name...',
+                prefixIcon: const Icon(Icons.search, color: Colors.teal),
+                suffixIcon: _searchKeyword.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.grey),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchKeyword = '';
+                          });
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: Colors.grey.shade100,
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 0,
+                  horizontal: 16,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
               ),
-              itemCount: products.length,
-              itemBuilder: (context, index) {
-                final item = products[index];
-                return Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: () async {
-                      // Navigate to details screen. If data is modified, refresh home screen on return.
-                      await Navigator.pushNamed(
-                        context,
-                        '/content',
-                        arguments: {'product': item},
-                      );
-                      _refreshProducts();
-                    },
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          height: 100,
-                          color: Colors.teal.shade50,
-                          child: const Center(
-                            child: Icon(
-                              Icons.shopping_bag,
-                              size: 40,
-                              color: Colors.teal,
-                            ),
-                          ),
+              onChanged: (value) {
+                setState(() {
+                  _searchKeyword = value.trim();
+                });
+              },
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<Product>>(
+              future: _searchKeyword.isEmpty
+                  ? _dbHelper.getProducts()
+                  : _dbHelper.searchProducts(_searchKeyword),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(child: Text('No matching items found.'));
+                }
+
+                final products = snapshot.data!;
+                return Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: GridView.builder(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          childAspectRatio: 0.73,
+                          crossAxisSpacing: 8.0,
+                          mainAxisSpacing: 8.0,
                         ),
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
+                    itemCount: products.length,
+                    itemBuilder: (context, index) {
+                      final item = products[index];
+                      return Card(
+                        clipBehavior: Clip.antiAlias,
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: InkWell(
+                          onTap: () async {
+                            await Navigator.pushNamed(
+                              context,
+                              '/content',
+                              arguments: {'product': item},
+                            );
+                            _refreshProducts();
+                          },
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                item.title,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              Container(
+                                height: 100,
+                                width: double.infinity,
+                                color: Colors.teal.shade50,
+                                child: item.imagePath != null
+                                    ? Image.file(
+                                        File(item.imagePath!),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : const Center(
+                                        child: Icon(
+                                          Icons.shopping_bag,
+                                          size: 40,
+                                          color: Colors.teal,
+                                        ),
+                                      ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'RM ${item.price.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.bold,
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.title,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'RM ${item.price.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                        color: Colors.orange,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    const Divider(
+                                      height: 1,
+                                      color: Colors.black12,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.account_circle,
+                                          size: 14,
+                                          color: Colors.teal,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            item.sellerName ?? 'Anonymous',
+                                            style: TextStyle(
+                                              color: Colors.grey.shade600,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 );
               },
             ),
-          );
-        },
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          // Navigate to create mode
           await Navigator.pushNamed(
             context,
             '/content',
             arguments: {'action': 'create'},
           );
-          _refreshProducts(); // Reload data
+          _refreshProducts();
         },
         backgroundColor: Colors.teal,
         child: const Icon(Icons.add, color: Colors.white),

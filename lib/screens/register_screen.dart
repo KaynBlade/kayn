@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/db_helper.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -9,6 +10,11 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
+  final DBHelper _dbHelper = DBHelper();
+
+  String _name = '';
+  String _email = '';
+  String _password = '';
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +33,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 validator: (val) =>
                     val!.isEmpty ? 'Please enter your name' : null,
+                onSaved: (val) => _name = val!.trim(),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -34,8 +41,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   labelText: 'Xiamen University Email',
                   border: OutlineInputBorder(),
                 ),
-                validator: (val) =>
-                    val!.isEmpty ? 'Please enter your email' : null,
+                validator: (val) => !val!.contains('@')
+                    ? 'Please enter a valid email address'
+                    : null,
+                onSaved: (val) => _email = val!.trim(),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -44,8 +53,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   labelText: 'Password',
                   border: OutlineInputBorder(),
                 ),
-                validator: (val) =>
-                    val!.isEmpty ? 'Please enter your password' : null,
+                validator: (val) => val!.length < 6
+                    ? 'Password must be at least 6 characters'
+                    : null,
+                onSaved: (val) => _password = val!,
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -56,16 +67,35 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     backgroundColor: Colors.teal,
                     foregroundColor: Colors.white,
                   ),
-                  onPressed: () {
+                  onPressed: () async {
                     if (_formKey.currentState!.validate()) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Registration successful! Please login.',
-                          ),
-                        ),
+                      _formKey.currentState!.save();
+
+                      int result = await _dbHelper.registerUser(
+                        _name,
+                        _email,
+                        _password,
                       );
-                      Navigator.pop(context); // Go back to login screen
+                      if (!mounted) return;
+
+                      if (result != -1) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Registration successful! Please login.',
+                            ),
+                          ),
+                        );
+                        Navigator.pop(context);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Email already registered! Try another one.',
+                            ),
+                          ),
+                        );
+                      }
                     }
                   },
                   child: const Text('Register', style: TextStyle(fontSize: 16)),

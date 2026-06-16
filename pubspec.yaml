@@ -10,8 +10,13 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  sqflite: ^2.4.0
-  path: ^1.9.1
+  
+  # Local Persistence Database
+  sqflite: ^2.4.2+1
+  path: ^1.9.0
+  
+  # Local Media Image Picker
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
