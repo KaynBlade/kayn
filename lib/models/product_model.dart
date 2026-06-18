@@ -1,14 +1,18 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Product {
-  final int? id;
+  final String? firestoreId; // Firestore document ID (replaces int id)
+  final int? id;             // kept for backward compat, unused in Firebase mode
   final String title;
   final double price;
   final String description;
-  final int? sellerId;
+  final String? sellerId;
   final String? sellerName;
   final String? sellerEmail;
   final String? imagePath;
 
   Product({
+    this.firestoreId,
     this.id,
     required this.title,
     required this.price,
@@ -18,6 +22,35 @@ class Product {
     this.sellerEmail,
     this.imagePath,
   });
+
+  /// Build a Product from a Firestore document snapshot.
+  factory Product.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return Product(
+      firestoreId: doc.id,
+      title: data['title'] ?? '',
+      price: (data['price'] as num).toDouble(),
+      description: data['description'] ?? '',
+      sellerId: data['sellerId'],
+      sellerName: data['sellerName'],
+      sellerEmail: data['sellerEmail'],
+      imagePath: data['imagePath'],
+    );
+  }
+
+  /// Legacy SQLite support (keep so old screens compile).
+  factory Product.fromMap(Map<String, dynamic> map) {
+    return Product(
+      id: map['id'],
+      title: map['title'] ?? '',
+      price: (map['price'] as num).toDouble(),
+      description: map['description'] ?? '',
+      sellerId: map['seller_id']?.toString(),
+      sellerName: map['seller_name'],
+      sellerEmail: map['seller_email'],
+      imagePath: map['image_path'],
+    );
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -30,18 +63,5 @@ class Product {
       if (sellerEmail != null) 'seller_email': sellerEmail,
       'image_path': imagePath,
     };
-  }
-
-  factory Product.fromMap(Map<String, dynamic> map) {
-    return Product(
-      id: map['id'],
-      title: map['title'] ?? '',
-      price: (map['price'] as num).toDouble(),
-      description: map['description'] ?? '',
-      sellerId: map['seller_id'],
-      sellerName: map['seller_name'],
-      sellerEmail: map['seller_email'],
-      imagePath: map['image_path'],
-    );
   }
 }

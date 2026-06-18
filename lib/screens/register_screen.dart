@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/db_helper.dart';
+import '../services/firebase_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -10,49 +10,55 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final DBHelper _dbHelper = DBHelper();
-
+  final FirebaseService _fbService = FirebaseService();
   String _name = '';
   String _email = '';
   String _password = '';
+  bool _isLoading = false;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create New Account')),
-      body: SingleChildScrollView(
+      appBar: AppBar(title: const Text('Create Account')),
+      body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Form(
           key: _formKey,
-          child: Column(
+          child: ListView(
             children: [
+              const SizedBox(height: 20),
+              const Icon(Icons.person_add, size: 60, color: Colors.teal),
+              const SizedBox(height: 16),
               TextFormField(
                 decoration: const InputDecoration(
                   labelText: 'Full Name',
                   border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.person),
                 ),
                 validator: (val) =>
                     val!.isEmpty ? 'Please enter your name' : null,
-                onSaved: (val) => _name = val!.trim(),
+                onSaved: (val) => _name = val!,
               ),
               const SizedBox(height: 16),
               TextFormField(
                 decoration: const InputDecoration(
-                  labelText: 'Xiamen University Email',
+                  labelText: 'Email',
                   border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.email),
                 ),
-                validator: (val) => !val!.contains('@')
-                    ? 'Please enter a valid email address'
-                    : null,
-                onSaved: (val) => _email = val!.trim(),
+                keyboardType: TextInputType.emailAddress,
+                validator: (val) =>
+                    val!.isEmpty ? 'Please enter your email' : null,
+                onSaved: (val) => _email = val!,
               ),
               const SizedBox(height: 16),
               TextFormField(
-                obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Password',
                   border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.lock),
                 ),
+                obscureText: true,
                 validator: (val) => val!.length < 6
                     ? 'Password must be at least 6 characters'
                     : null,
@@ -61,45 +67,78 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
-                height: 48,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.teal,
                     foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  onPressed: () async {
-                    if (_formKey.currentState!.validate()) {
-                      _formKey.currentState!.save();
+                  onPressed: _isLoading
+                      ? null
+                      : () async {
+                          if (!_formKey.currentState!.validate()) return;
+                          _formKey.currentState!.save();
+                          setState(() => _isLoading = true);
 
-                      int result = await _dbHelper.registerUser(
-                        _name,
-                        _email,
-                        _password,
-                      );
-                      if (!mounted) return;
+                          try {
+                            final error = await _fbService.registerUser(
+                                _name, _email, _password);
+                            if (!mounted) return;
+                            setState(() => _isLoading = false);
 
-                      if (result != -1) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Registration successful! Please login.',
-                            ),
+                            if (error == null) {
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Check Your Email! 📧'),
+                                  content: Text(
+                                    'A verification email has been sent to $_email. Please verify your email before logging in.',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () {
+                                        Navigator.pop(ctx);
+                                        Navigator.pushNamedAndRemoveUntil(
+                                          context,
+                                          '/login',
+                                          (route) => false,
+                                        );
+                                      },
+                                      child: const Text('Go to Login'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(error)),
+                              );
+                            }
+                          } catch (e) {
+                            if (!mounted) return;
+                            setState(() => _isLoading = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: $e')),
+                            );
+                          }
+                        },
+                  child: _isLoading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
                           ),
-                        );
-                        Navigator.pop(context);
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Email already registered! Try another one.',
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  child: const Text('Register', style: TextStyle(fontSize: 16)),
+                        )
+                      : const Text('Register', style: TextStyle(fontSize: 16)),
                 ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Already have an account? Login here'),
               ),
             ],
           ),

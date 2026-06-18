@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../services/db_helper.dart';
+import '../services/firebase_service.dart';
 import '../models/product_model.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -11,7 +11,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final DBHelper _dbHelper = DBHelper();
+  final FirebaseService _fbService = FirebaseService();
   final TextEditingController _searchController = TextEditingController();
 
   String _searchKeyword = '';
@@ -94,8 +94,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: FutureBuilder<List<Product>>(
               future: _searchKeyword.isEmpty
-                  ? _dbHelper.getProducts()
-                  : _dbHelper.searchProducts(_searchKeyword),
+                  ? _fbService.getProducts()
+                  : _fbService.searchProducts(_searchKeyword),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

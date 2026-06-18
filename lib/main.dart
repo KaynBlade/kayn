@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'services/db_helper.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/home_screen.dart';
@@ -7,8 +7,19 @@ import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/content_screen.dart';
 import 'screens/help_screen.dart';
+import 'services/firebase_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: const FirebaseOptions(
+      apiKey: 'AIzaSyAJqm3h6xqMZtkJ65YPUYbU81-cnCZjRH4',
+      appId: '1:32586762212:android:6da446e1522c9f7eed69f1',
+      messagingSenderId: '32586762212',
+      projectId: 'kayn-7119a',
+      storageBucket: 'kayn-7119a.firebasestorage.app',
+    ),
+  );
   runApp(const SecondHandMarketApp());
 }
 
@@ -17,7 +28,7 @@ class SecondHandMarketApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final DBHelper dbHelper = DBHelper();
+    final FirebaseService firebaseService = FirebaseService();
 
     return MaterialApp(
       title: 'Campus Second-hand Trading Platform',
@@ -35,16 +46,14 @@ class SecondHandMarketApp extends StatelessWidget {
           centerTitle: true,
         ),
       ),
-      // Intercept and resolve system routing node based on active authentication cache
       home: FutureBuilder<Map<String, dynamic>?>(
-        future: dbHelper.getCurrentSession(),
+        future: firebaseService.getCurrentSession(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             );
           }
-          // If valid user session found on storage layer, directly pass to Home dashboard
           if (snapshot.hasData && snapshot.data != null) {
             return const HomeScreen();
           }

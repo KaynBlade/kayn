@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/product_model.dart';
-import '../services/db_helper.dart';
+import '../services/firebase_service.dart';
 
 class ContentScreen extends StatefulWidget {
   const ContentScreen({super.key});
@@ -13,32 +13,36 @@ class ContentScreen extends StatefulWidget {
 
 class _ContentScreenState extends State<ContentScreen> {
   final _formKey = GlobalKey<FormState>();
-  final DBHelper _dbHelper = DBHelper();
+  final FirebaseService _fbService = FirebaseService();
   final ImagePicker _picker = ImagePicker();
 
   String _title = '';
   double _price = 0.0;
   String _description = '';
   String? _selectedImagePath;
-  int? _currentUserId;
   bool _isFavCached = false;
+  bool _sessionLoaded = false;
 
   @override
   void initState() {
     super.initState();
-    _loadSessionAndFavContext();
+    _loadSession();
   }
 
-  void _loadSessionAndFavContext() async {
-    final session = await _dbHelper.getCurrentSession();
-    _currentUserId = session?['current_user_id'];
+  void _loadSession() async {
+    if (!mounted) return;
+    setState(() {
+      _sessionLoaded = true;
+    });
 
-    if (mounted && _currentUserId != null) {
-      final args =
-          ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-      Product? product = args?['product'] as Product?;
-      if (product != null && product.id != null) {
-        bool fav = await _dbHelper.isFavorite(_currentUserId!, product.id!);
+    final args =
+        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final Product? product = args?['product'] as Product?;
+
+    if (product != null && product.firestoreId != null) {
+      await _fbService.recordBrowseHistory(product);
+      final bool fav = await _fbService.isFavorite(product.firestoreId!);
+      if (mounted) {
         setState(() {
           _isFavCached = fav;
         });
@@ -60,10 +64,12 @@ class _ContentScreenState extends State<ContentScreen> {
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
-    bool isCreateMode = args != null && args['action'] == 'create';
-    Product? existingProduct = args?['product'] as Product?;
-    bool isOwner =
-        existingProduct != null && _currentUserId == existingProduct.sellerId;
+    final bool isCreateMode = args != null && args['action'] == 'create';
+    final bool isEditMode = args != null && args['action'] == 'edit';
+    final Product? existingProduct = args?['product'] as Product?;
+    final bool isOwner = existingProduct != null &&
+        _sessionLoaded &&
+        _fbService.currentUserId == existingProduct.sellerId;
 
     if (!isCreateMode &&
         existingProduct != null &&
@@ -82,21 +88,25 @@ class _ContentScreenState extends State<ContentScreen> {
           if (!isCreateMode && existingProduct != null && isOwner) ...[
             IconButton(
               icon: const Icon(Icons.delete),
-              onPressed: () => _showDeleteDialog(existingProduct.id!),
+              tooltip: 'Delete listing',
+              onPressed: () =>
+                  _showDeleteDialog(existingProduct.firestoreId!),
             ),
           ],
-          if (!isCreateMode && existingProduct != null && !isOwner) ...[
+          if (!isCreateMode &&
+              existingProduct != null &&
+              !isOwner &&
+              _sessionLoaded) ...[
             IconButton(
               icon: Icon(
                 _isFavCached ? Icons.favorite : Icons.favorite_border,
                 color: _isFavCached ? Colors.red : Colors.white,
               ),
+              tooltip:
+                  _isFavCached ? 'Remove from favorites' : 'Add to favorites',
               onPressed: () async {
-                if (_currentUserId != null && existingProduct.id != null) {
-                  await _dbHelper.toggleFavorite(
-                    _currentUserId!,
-                    existingProduct.id!,
-                  );
+                if (existingProduct.firestoreId != null) {
+                  await _fbService.toggleFavorite(existingProduct.firestoreId!);
                   setState(() {
                     _isFavCached = !_isFavCached;
                   });
@@ -108,14 +118,16 @@ class _ContentScreenState extends State<ContentScreen> {
       ),
       body: isCreateMode
           ? _buildForm(null)
-          : (existingProduct != null
-                ? _buildDetails(existingProduct, isOwner)
-                : const Center(child: Text('Data Error'))),
+          : isEditMode && existingProduct != null
+              ? _buildForm(existingProduct)
+              : (existingProduct != null
+                  ? _buildDetails(existingProduct, isOwner)
+                  : const Center(child: Text('Data Error'))),
     );
   }
 
   Widget _buildForm(Product? product) {
-    bool isEdit = product != null;
+    final bool isEdit = product != null;
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Form(
@@ -184,7 +196,7 @@ class _ContentScreenState extends State<ContentScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLines: 4,
-              onSaved: (val) => _description = val!,
+              onSaved: (val) => _description = val ?? '',
             ),
             const SizedBox(height: 20),
             ElevatedButton(
@@ -195,11 +207,10 @@ class _ContentScreenState extends State<ContentScreen> {
               onPressed: () async {
                 if (_formKey.currentState!.validate()) {
                   _formKey.currentState!.save();
-
                   if (isEdit) {
-                    await _dbHelper.updateProduct(
+                    await _fbService.updateProduct(
                       Product(
-                        id: product.id,
+                        firestoreId: product.firestoreId,
                         title: _title,
                         price: _price,
                         description: _description,
@@ -210,7 +221,7 @@ class _ContentScreenState extends State<ContentScreen> {
                       ),
                     );
                   } else {
-                    await _dbHelper.insertProduct(
+                    await _fbService.insertProduct(
                       Product(
                         title: _title,
                         price: _price,
@@ -220,7 +231,7 @@ class _ContentScreenState extends State<ContentScreen> {
                     );
                   }
                   if (!mounted) return;
-                  Navigator.pop(context);
+                  Navigator.pop(context, true);
                 }
               },
               child: Text(isEdit ? 'Save Changes' : 'Confirm Post'),
@@ -244,7 +255,7 @@ class _ContentScreenState extends State<ContentScreen> {
               color: Colors.teal.shade50,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: product.imagePath != null
+            child: product.imagePath != null && product.imagePath!.isNotEmpty
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.file(
@@ -307,16 +318,15 @@ class _ContentScreenState extends State<ContentScreen> {
                   backgroundColor: Colors.grey.shade300,
                   foregroundColor: Colors.black87,
                 ),
-                onPressed: () {
-                  Navigator.pushReplacement(
+                onPressed: () async {
+                  final result = await Navigator.pushNamed(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => Scaffold(
-                        appBar: AppBar(title: const Text('Edit Item')),
-                        body: _buildForm(product),
-                      ),
-                    ),
+                    '/content',
+                    arguments: {'action': 'edit', 'product': product},
                   );
+                  if (result == true && mounted) {
+                    Navigator.pop(context, true);
+                  }
                 },
               ),
             )
@@ -346,7 +356,7 @@ class _ContentScreenState extends State<ContentScreen> {
     );
   }
 
-  void _showDeleteDialog(int id) {
+  void _showDeleteDialog(String firestoreId) {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -361,10 +371,10 @@ class _ContentScreenState extends State<ContentScreen> {
           ),
           TextButton(
             onPressed: () async {
-              await _dbHelper.deleteProduct(id);
+              await _fbService.deleteProduct(firestoreId);
               if (!mounted) return;
               Navigator.pop(dialogContext);
-              Navigator.pop(context);
+              Navigator.pop(context, true);
             },
             child: const Text(
               'Confirm Delete',

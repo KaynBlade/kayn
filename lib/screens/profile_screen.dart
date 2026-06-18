@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../services/db_helper.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/firebase_service.dart';
 import '../models/product_model.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -11,10 +12,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final DBHelper _dbHelper = DBHelper();
+  final FirebaseService _fbService = FirebaseService();
   String _userName = 'Loading...';
   String _userEmail = 'Loading...';
-  int? _userId;
 
   @override
   void initState() {
@@ -22,19 +22,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadUserProfile();
   }
 
-  void _loadUserProfile() async {
-    final session = await _dbHelper.getCurrentSession();
+  void _loadUserProfile() {
+    final session = _fbService.getCurrentSessionSync();
     setState(() {
-      _userId = session?['current_user_id'];
       _userName = session?['current_user_name'] ?? 'Guest';
-      _userEmail = session?['current_user_email'] ?? 'guest@xmu.edu.my';
+      _userEmail = session?['current_user_email'] ?? '';
     });
+  }
+
+  void _showEditProfileDialog() {
+    final nameController = TextEditingController(text: _userName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Profile'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Display Name',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+            onPressed: () async {
+              final newName = nameController.text.trim();
+              if (newName.isEmpty) return;
+              await FirebaseAuth.instance.currentUser?.updateDisplayName(newName);
+              if (!mounted) return;
+              setState(() => _userName = newName);
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Profile updated successfully!')),
+              );
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile Center')),
+      appBar: AppBar(
+        title: const Text('Profile Center'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            tooltip: 'Edit Profile',
+            onPressed: _showEditProfileDialog,
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
@@ -49,43 +95,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 12),
                 Text(
                   _userName,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 Text(_userEmail, style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.edit, size: 16),
+                  label: const Text('Edit Profile'),
+                  onPressed: _showEditProfileDialog,
+                ),
               ],
             ),
           ),
           const SizedBox(height: 24),
           const Divider(),
-
           ListTile(
             leading: const Icon(Icons.bookmark_border, color: Colors.teal),
             title: const Text('My Listed Items'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              if (_userId != null) {
-                _navigateToProductList(
-                  'My Listed Items',
-                  _dbHelper.getMyListedItems(_userId!),
-                );
-              }
-            },
+            onTap: () => _navigateToProductList('My Listed Items', _fbService.getMyListedItems()),
           ),
-
           ListTile(
             leading: const Icon(Icons.favorite_border, color: Colors.teal),
             title: const Text('My Favorites'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              if (_userId != null) {
-                _navigateToProductList(
-                  'My Favorites',
-                  _dbHelper.getMyFavorites(_userId!),
-                );
-              }
+            onTap: () => _navigateToProductList('My Favorites', _fbService.getMyFavorites()),
+          ),
+          ListTile(
+            leading: const Icon(Icons.history, color: Colors.teal),
+            title: const Text('Browse History'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _navigateToBrowseHistory(),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Log Out', style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              await _fbService.clearSession();
+              if (!mounted) return;
+              Navigator.pushReplacementNamed(context, '/login');
             },
           ),
         ],
@@ -93,54 +142,184 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _navigateToProductList(
-    String pageTitle,
-    Future<List<Product>> dataFetchMethod,
-  ) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          appBar: AppBar(title: Text(pageTitle)),
-          body: FutureBuilder<List<Product>>(
-            future: dataFetchMethod,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Center(
-                  child: Text('No item logs found under this tab.'),
-                );
-              }
-              final items = snapshot.data!;
-              return ListView.builder(
-                padding: const EdgeInsets.all(8),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final product = items[index];
-                  return Card(
-                    child: ListTile(
-                      leading: product.imagePath != null
-                          ? Image.file(
-                              File(product.imagePath!),
-                              width: 50,
-                              height: 50,
-                              fit: BoxFit.cover,
-                            )
-                          : const Icon(Icons.shopping_bag, color: Colors.teal),
-                      title: Text(
-                        product.title,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text('RM ${product.price.toStringAsFixed(2)}'),
-                    ),
-                  );
-                },
+  void _navigateToProductList(String title, Future<List<Product>> dataFuture) {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (context) => _ProductListPage(title: title, dataFuture: dataFuture),
+    ));
+  }
+
+  void _navigateToBrowseHistory() {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (context) => _BrowseHistoryPage(fbService: _fbService),
+    ));
+  }
+}
+
+// ─── Product List Page ────────────────────────────────────────────────────────
+
+class _ProductListPage extends StatelessWidget {
+  final String title;
+  final Future<List<Product>> dataFuture;
+  const _ProductListPage({required this.title, required this.dataFuture});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: FutureBuilder<List<Product>>(
+        future: dataFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('No items found.'));
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: snapshot.data!.length,
+            itemBuilder: (context, index) {
+              final product = snapshot.data![index];
+              return Card(
+                child: ListTile(
+                  leading: product.imagePath != null && product.imagePath!.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(File(product.imagePath!), width: 50, height: 50, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Icon(Icons.shopping_bag, color: Colors.teal)),
+                        )
+                      : const Icon(Icons.shopping_bag, color: Colors.teal),
+                  title: Text(product.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('RM ${product.price.toStringAsFixed(2)}'),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                  onTap: () => Navigator.pushNamed(context, '/content', arguments: {'product': product}),
+                ),
               );
             },
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Browse History Page ──────────────────────────────────────────────────────
+
+class _BrowseHistoryPage extends StatefulWidget {
+  final FirebaseService fbService;
+  const _BrowseHistoryPage({required this.fbService});
+
+  @override
+  State<_BrowseHistoryPage> createState() => _BrowseHistoryPageState();
+}
+
+class _BrowseHistoryPageState extends State<_BrowseHistoryPage> {
+  late Future<List<Map<String, dynamic>>> _historyFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyFuture = widget.fbService.getBrowseHistory();
+  }
+
+  void _reload() => setState(() {
+    _historyFuture = widget.fbService.getBrowseHistory();
+  });
+
+  String _formatTime(int ms) {
+    final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Browse History'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_sweep),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Clear Browse History?'),
+                  content: const Text('All browsing records will be permanently removed.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Clear', style: TextStyle(color: Colors.red))),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                await widget.fbService.clearBrowseHistory();
+                _reload();
+              }
+            },
           ),
-        ),
+        ],
+      ),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _historyFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.history, size: 60, color: Colors.grey),
+                  SizedBox(height: 12),
+                  Text('No browse history yet.', style: TextStyle(color: Colors.grey)),
+                ],
+              ),
+            );
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: snapshot.data!.length,
+            itemBuilder: (context, index) {
+              final entry = snapshot.data![index];
+              final String? imagePath = entry['product_image_path'] as String?;
+              final double price = (entry['product_price'] as num).toDouble();
+              final int viewedAt = entry['viewed_at'] as int;
+              return Card(
+                child: ListTile(
+                  leading: imagePath != null && imagePath.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(File(imagePath), width: 50, height: 50, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Icon(Icons.shopping_bag, color: Colors.teal)),
+                        )
+                      : const Icon(Icons.shopping_bag, color: Colors.teal),
+                  title: Text(entry['product_title'] as String,
+                    style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('RM ${price.toStringAsFixed(2)}'),
+                  trailing: Text(_formatTime(viewedAt), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  onTap: () async {
+                    final String productId = entry['product_id'] as String;
+                    final products = await widget.fbService.getProducts();
+                    final Product? product = products.where((p) => p.firestoreId == productId).firstOrNull;
+                    if (!mounted) return;
+                    if (product != null) {
+                      await Navigator.pushNamed(context, '/content', arguments: {'product': product});
+                      _reload();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('This item has been removed.')));
+                    }
+                  },
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
