@@ -1,105 +1,212 @@
 import 'package:flutter/material.dart';
 import '../services/firebase_service.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final FirebaseService _fbService = FirebaseService();
+  bool _notificationsEnabled = true;
+  bool _emailPrivacy = false;
+  String _selectedLanguage = 'English';
+
+  @override
   Widget build(BuildContext context) {
-    final FirebaseService fbService = FirebaseService();
     return Scaffold(
       appBar: AppBar(title: const Text('System Settings')),
       body: ListView(
         children: [
+          // ── Notifications ──────────────────────────────────────────────
+          _sectionHeader('Notifications'),
           SwitchListTile(
-            title: const Text('Enable Push Notifications'),
-            subtitle: const Text(
-              'Notify me when someone is interested in my items',
-            ),
-            value: true,
+            secondary: const Icon(Icons.notifications_outlined, color: Colors.teal),
+            title: const Text('Push Notifications'),
+            subtitle: const Text('Get notified when someone is interested in your items'),
+            value: _notificationsEnabled,
             activeColor: Colors.teal,
-            onChanged: (bool value) {},
+            onChanged: (val) => setState(() => _notificationsEnabled = val),
           ),
           const Divider(),
+
+          // ── Privacy ────────────────────────────────────────────────────
+          _sectionHeader('Privacy'),
+          SwitchListTile(
+            secondary: const Icon(Icons.visibility_off_outlined, color: Colors.teal),
+            title: const Text('Hide Email from Buyers'),
+            subtitle: const Text('Buyers will contact you through in-app messaging only'),
+            value: _emailPrivacy,
+            activeColor: Colors.teal,
+            onChanged: (val) => setState(() => _emailPrivacy = val),
+          ),
+          const Divider(),
+
+          // ── Language ───────────────────────────────────────────────────
+          _sectionHeader('Language'),
+          ListTile(
+            leading: const Icon(Icons.language, color: Colors.teal),
+            title: const Text('App Language'),
+            subtitle: Text(_selectedLanguage),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showLanguagePicker(),
+          ),
+          const Divider(),
+
+          // ── Account ────────────────────────────────────────────────────
+          _sectionHeader('Account'),
+          ListTile(
+            leading: const Icon(Icons.lock_outline, color: Colors.teal),
+            title: const Text('Change Password'),
+            subtitle: const Text('Send a password reset email'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _sendPasswordReset(),
+          ),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.orange),
             title: const Text('Logout Account'),
             subtitle: const Text('Sign out from current session safely'),
             onTap: () async {
-              await fbService.clearSession();
-              if (!context.mounted) return;
+              await _fbService.clearSession();
+              if (!mounted) return;
               Navigator.pushNamedAndRemoveUntil(
-                context,
-                '/login',
-                (route) => false,
-              );
+                  context, '/login', (route) => false);
             },
           ),
           const Divider(),
+
+          // ── About ──────────────────────────────────────────────────────
+          _sectionHeader('About'),
           ListTile(
-            leading: const Icon(Icons.delete_forever, color: Colors.red),
-            title: const Text(
-              'Delete Account Permanently',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
-            subtitle: const Text(
-              'Erase your profile and all your listings from market',
-            ),
-            onTap: () => _showDeleteAccountDialog(context, fbService),
+            leading: const Icon(Icons.info_outline, color: Colors.teal),
+            title: const Text('About This App'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showAboutDialog(),
           ),
+          ListTile(
+            leading: const Icon(Icons.support_agent, color: Colors.teal),
+            title: const Text('Contact Support'),
+            subtitle: const Text('support@xmum-marketplace.com'),
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                    content: Text(
+                        'Opening email client to: support@xmum-marketplace.com')),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.star_outline, color: Colors.teal),
+            title: const Text('Rate This App'),
+            subtitle: const Text('Enjoying the app? Leave us a review!'),
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Thank you for your support!')),
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+          const Center(
+            child: Text('Version 1.0.0 — XMUM Campus Marketplace',
+                style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  void _showDeleteAccountDialog(
-      BuildContext context, FirebaseService fbService) {
+  Widget _sectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(
+        title.toUpperCase(),
+        style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.teal,
+            letterSpacing: 1.2),
+      ),
+    );
+  }
+
+  void _showLanguagePicker() {
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text(
-          'Danger Zone: Delete Account?',
-          style: TextStyle(color: Colors.red),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Select Language'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: ['English', '中文 (Chinese)', 'Bahasa Melayu'].map((lang) {
+            return RadioListTile<String>(
+              title: Text(lang),
+              value: lang,
+              groupValue: _selectedLanguage,
+              activeColor: Colors.teal,
+              onChanged: (val) {
+                setState(() => _selectedLanguage = val!);
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Language set to $val')),
+                );
+              },
+            );
+          }).toList(),
         ),
-        content: const Text(
-          'Are you absolutely sure? This will permanently delete your user profile and remove ALL items you have posted. This action is irreversible.',
+      ),
+    );
+  }
+
+  void _sendPasswordReset() async {
+    final email = _fbService.currentUserEmail;
+    if (email == null) return;
+    try {
+      await _fbService.sendPasswordReset(email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Password reset email sent to $email')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.store, color: Colors.teal),
+            const SizedBox(width: 8),
+            const Text('XMUM Marketplace'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Version 1.0.0'),
+            SizedBox(height: 8),
+            Text(
+                'A campus second-hand trading platform for XMUM students to buy, sell, and exchange pre-owned items safely within the campus community.'),
+            SizedBox(height: 8),
+            Text('Built with Flutter & Firebase.',
+                style: TextStyle(color: Colors.grey, fontSize: 12)),
+            SizedBox(height: 4),
+            Text('SWE311 Assignment 2 — 2026',
+                style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              // Delete all user's listed items
-              final myItems = await fbService.getMyListedItems();
-              for (final item in myItems) {
-                if (item.firestoreId != null) {
-                  await fbService.deleteProduct(item.firestoreId!);
-                }
-              }
-              // Clear browse history and sign out
-              await fbService.clearBrowseHistory();
-              await fbService.clearSession();
-              if (!context.mounted) return;
-              Navigator.pop(dialogContext);
-              Navigator.pushNamedAndRemoveUntil(
-                context,
-                '/login',
-                (route) => false,
-              );
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Your account and listings have been completely erased.',
-                  ),
-                ),
-              );
-            },
-            child: const Text(
-              'Confirm Erase',
-              style: TextStyle(color: Colors.red),
-            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: Colors.teal)),
           ),
         ],
       ),

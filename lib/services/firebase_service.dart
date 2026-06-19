@@ -1,5 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import '../models/product_model.dart';
 
 class FirebaseService {
@@ -9,6 +12,20 @@ class FirebaseService {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  // ─── Image Helpers ────────────────────────────────────────────────────
+
+  Future<String?> imageToBase64(String filePath) async {
+    try {
+      final compressed = await FlutterImageCompress.compressWithFile(
+        filePath, quality: 40, minWidth: 600, minHeight: 600,
+      );
+      if (compressed == null) return null;
+      return base64Encode(compressed);
+    } catch (e) {
+      return null;
+    }
+  }
 
   // ─── Current User Helpers ─────────────────────────────────────────────
 
@@ -32,18 +49,35 @@ class FirebaseService {
     return getCurrentSessionSync();
   }
 
+  // ─── User Profile ─────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> getUserDoc(String uid) async {
+    try {
+      final doc = await _db.collection('users').doc(uid).get();
+      return doc.exists ? doc.data() : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> updateUserAvatar(String uid, String base64) async {
+    await _db.collection('users').doc(uid).update({'avatarBase64': base64});
+  }
+
+  Future<void> sendPasswordReset(String email) async {
+    await _auth.sendPasswordResetEmail(email: email);
+  }
+
   // ─── Auth ─────────────────────────────────────────────────────────────
 
-  Future<String?> registerUser(
-      String name, String email, String password) async {
+  Future<String?> registerUser(String name, String email, String password) async {
     try {
       final cred = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
+        email: email, password: password,
       );
       await cred.user?.updateDisplayName(name);
       await cred.user?.sendEmailVerification();
-      await _auth.signOut(); // sign out until email is verified
+      await _auth.signOut();
       await _db.collection('users').doc(cred.user!.uid).set({
         'name': name,
         'email': email,
@@ -51,19 +85,14 @@ class FirebaseService {
       });
       return null;
     } on FirebaseAuthException catch (e) {
-      if (e.code == 'email-already-in-use') {
-        return 'Email already registered! Try another one.';
-      }
+      if (e.code == 'email-already-in-use') return 'Email already registered!';
       return e.message ?? 'Registration failed.';
     }
   }
 
   Future<String?> loginUser(String email, String password) async {
     try {
-      await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      await _auth.signInWithEmailAndPassword(email: email, password: password);
       if (!_auth.currentUser!.emailVerified) {
         await _auth.signOut();
         return 'Please verify your email first! Check your inbox.';
@@ -79,15 +108,17 @@ class FirebaseService {
     }
   }
 
-  Future<void> clearSession() async {
-    await _auth.signOut();
-  }
+  Future<void> clearSession() async => await _auth.signOut();
 
   // ─── Products ─────────────────────────────────────────────────────────
 
   Future<void> insertProduct(Product product) async {
     final user = _auth.currentUser;
     if (user == null) return;
+    String? imageBase64;
+    if (product.imagePath != null && product.imagePath!.isNotEmpty) {
+      imageBase64 = await imageToBase64(product.imagePath!);
+    }
     await _db.collection('products').add({
       'title': product.title,
       'price': product.price,
@@ -95,7 +126,7 @@ class FirebaseService {
       'sellerId': user.uid,
       'sellerName': user.displayName ?? 'Anonymous',
       'sellerEmail': user.email ?? '',
-      'imagePath': product.imagePath ?? '',
+      'imageBase64': imageBase64 ?? '',
       'status': 0,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -113,49 +144,41 @@ class FirebaseService {
   Future<List<Product>> searchProducts(String keyword) async {
     final all = await getProducts();
     final lower = keyword.toLowerCase();
-    return all
-        .where((p) =>
-            p.title.toLowerCase().contains(lower) ||
-            (p.sellerName?.toLowerCase().contains(lower) ?? false))
-        .toList();
+    return all.where((p) =>
+        p.title.toLowerCase().contains(lower) ||
+        (p.sellerName?.toLowerCase().contains(lower) ?? false)).toList();
   }
 
   Future<void> updateProduct(Product product) async {
     if (product.firestoreId == null) return;
+    String? imageBase64 = product.imageBase64;
+    if (product.imagePath != null && product.imagePath!.isNotEmpty && product.imageBase64 == null) {
+      imageBase64 = await imageToBase64(product.imagePath!);
+    }
     await _db.collection('products').doc(product.firestoreId).update({
       'title': product.title,
       'price': product.price,
       'description': product.description,
-      'imagePath': product.imagePath ?? '',
+      'imageBase64': imageBase64 ?? '',
     });
   }
 
   Future<void> deleteProduct(String firestoreId) async {
     await _db.collection('products').doc(firestoreId).delete();
-    final favSnap = await _db
-        .collection('favorites')
-        .where('productId', isEqualTo: firestoreId)
-        .get();
-    for (final doc in favSnap.docs) {
-      await doc.reference.delete();
-    }
-    final histSnap = await _db
-        .collection('browse_history')
-        .where('productId', isEqualTo: firestoreId)
-        .get();
-    for (final doc in histSnap.docs) {
-      await doc.reference.delete();
-    }
+    final favSnap = await _db.collection('favorites')
+        .where('productId', isEqualTo: firestoreId).get();
+    for (final doc in favSnap.docs) await doc.reference.delete();
+    final histSnap = await _db.collection('browse_history')
+        .where('productId', isEqualTo: firestoreId).get();
+    for (final doc in histSnap.docs) await doc.reference.delete();
   }
 
   Future<List<Product>> getMyListedItems() async {
     final uid = currentUserId;
     if (uid == null) return [];
-    final snap = await _db
-        .collection('products')
+    final snap = await _db.collection('products')
         .where('sellerId', isEqualTo: uid)
-        .orderBy('createdAt', descending: true)
-        .get();
+        .orderBy('createdAt', descending: true).get();
     return snap.docs.map((doc) => Product.fromFirestore(doc)).toList();
   }
 
@@ -170,44 +193,33 @@ class FirebaseService {
     if (snap.exists) {
       await ref.delete();
     } else {
-      await ref.set({
-        'userId': uid,
-        'productId': productId,
-        'addedAt': FieldValue.serverTimestamp(),
-      });
+      await ref.set({'userId': uid, 'productId': productId, 'addedAt': FieldValue.serverTimestamp()});
     }
   }
 
   Future<bool> isFavorite(String productId) async {
     final uid = currentUserId;
     if (uid == null) return false;
-    final docId = '${uid}_$productId';
-    final snap = await _db.collection('favorites').doc(docId).get();
+    final snap = await _db.collection('favorites').doc('${uid}_$productId').get();
     return snap.exists;
   }
 
   Future<List<Product>> getMyFavorites() async {
     final uid = currentUserId;
     if (uid == null) return [];
-    final favSnap = await _db
-        .collection('favorites')
+    final favSnap = await _db.collection('favorites')
         .where('userId', isEqualTo: uid)
-        .orderBy('addedAt', descending: true)
-        .get();
-    final productIds =
-        favSnap.docs.map((d) => d.data()['productId'] as String).toList();
+        .orderBy('addedAt', descending: true).get();
+    final productIds = favSnap.docs.map((d) => d.data()['productId'] as String).toList();
     if (productIds.isEmpty) return [];
     final chunks = <List<String>>[];
     for (var i = 0; i < productIds.length; i += 30) {
-      chunks.add(productIds.sublist(
-          i, i + 30 > productIds.length ? productIds.length : i + 30));
+      chunks.add(productIds.sublist(i, i + 30 > productIds.length ? productIds.length : i + 30));
     }
     final products = <Product>[];
     for (final chunk in chunks) {
-      final snap = await _db
-          .collection('products')
-          .where(FieldPath.documentId, whereIn: chunk)
-          .get();
+      final snap = await _db.collection('products')
+          .where(FieldPath.documentId, whereIn: chunk).get();
       products.addAll(snap.docs.map((doc) => Product.fromFirestore(doc)));
     }
     return products;
@@ -224,29 +236,23 @@ class FirebaseService {
       'productId': product.firestoreId,
       'productTitle': product.title,
       'productPrice': product.price,
-      'productImagePath': product.imagePath ?? '',
+      'productImageBase64': product.imageBase64 ?? '',
       'viewedAt': FieldValue.serverTimestamp(),
     });
-    final snap = await _db
-        .collection('browse_history')
+    final snap = await _db.collection('browse_history')
         .where('userId', isEqualTo: uid)
-        .orderBy('viewedAt', descending: true)
-        .get();
+        .orderBy('viewedAt', descending: true).get();
     if (snap.docs.length > 50) {
-      for (final doc in snap.docs.sublist(50)) {
-        await doc.reference.delete();
-      }
+      for (final doc in snap.docs.sublist(50)) await doc.reference.delete();
     }
   }
 
   Future<List<Map<String, dynamic>>> getBrowseHistory() async {
     final uid = currentUserId;
     if (uid == null) return [];
-    final snap = await _db
-        .collection('browse_history')
+    final snap = await _db.collection('browse_history')
         .where('userId', isEqualTo: uid)
-        .orderBy('viewedAt', descending: true)
-        .get();
+        .orderBy('viewedAt', descending: true).get();
     return snap.docs.map((doc) {
       final data = doc.data();
       final ts = data['viewedAt'];
@@ -256,7 +262,7 @@ class FirebaseService {
       data['product_id'] = data['productId'];
       data['product_title'] = data['productTitle'];
       data['product_price'] = data['productPrice'];
-      data['product_image_path'] = data['productImagePath'];
+      data['product_image_base64'] = data['productImageBase64'];
       return data;
     }).toList();
   }
@@ -264,12 +270,8 @@ class FirebaseService {
   Future<void> clearBrowseHistory() async {
     final uid = currentUserId;
     if (uid == null) return;
-    final snap = await _db
-        .collection('browse_history')
-        .where('userId', isEqualTo: uid)
-        .get();
-    for (final doc in snap.docs) {
-      await doc.reference.delete();
-    }
+    final snap = await _db.collection('browse_history')
+        .where('userId', isEqualTo: uid).get();
+    for (final doc in snap.docs) await doc.reference.delete();
   }
 }

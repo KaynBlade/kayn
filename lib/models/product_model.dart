@@ -1,15 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Product {
-  final String? firestoreId; // Firestore document ID (replaces int id)
-  final int? id;             // kept for backward compat, unused in Firebase mode
+  final String? firestoreId;
+  final int? id;
   final String title;
   final double price;
   final String description;
   final String? sellerId;
   final String? sellerName;
   final String? sellerEmail;
-  final String? imagePath;
+  final String? imagePath;    // local path (used during picking only)
+  final String? imageBase64;  // stored in Firestore
 
   Product({
     this.firestoreId,
@@ -21,9 +22,9 @@ class Product {
     this.sellerName,
     this.sellerEmail,
     this.imagePath,
+    this.imageBase64,
   });
 
-  /// Build a Product from a Firestore document snapshot.
   factory Product.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return Product(
@@ -34,11 +35,10 @@ class Product {
       sellerId: data['sellerId'],
       sellerName: data['sellerName'],
       sellerEmail: data['sellerEmail'],
-      imagePath: data['imagePath'],
+      imageBase64: data['imageBase64'],
     );
   }
 
-  /// Legacy SQLite support (keep so old screens compile).
   factory Product.fromMap(Map<String, dynamic> map) {
     return Product(
       id: map['id'],

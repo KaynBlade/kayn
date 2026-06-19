@@ -1,6 +1,8 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import '../services/firebase_service.dart';
 import '../models/product_model.dart';
 
@@ -13,8 +15,11 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final FirebaseService _fbService = FirebaseService();
+  final ImagePicker _picker = ImagePicker();
   String _userName = 'Loading...';
   String _userEmail = 'Loading...';
+  String? _avatarBase64;
+  bool _isUploadingAvatar = false;
 
   @override
   void initState() {
@@ -22,12 +27,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadUserProfile();
   }
 
-  void _loadUserProfile() {
+  void _loadUserProfile() async {
     final session = _fbService.getCurrentSessionSync();
+    final uid = session?['current_user_id'];
     setState(() {
       _userName = session?['current_user_name'] ?? 'Guest';
       _userEmail = session?['current_user_email'] ?? '';
     });
+    if (uid != null) {
+      final doc = await _fbService.getUserDoc(uid);
+      if (doc != null && doc['avatarBase64'] != null && mounted) {
+        setState(() => _avatarBase64 = doc['avatarBase64']);
+      }
+    }
+  }
+
+  Future<void> _changeAvatar() async {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+    if (image == null) return;
+    setState(() => _isUploadingAvatar = true);
+    try {
+      final compressed = await FlutterImageCompress.compressWithFile(
+        image.path, quality: 50, minWidth: 300, minHeight: 300,
+      );
+      if (compressed == null) return;
+      final base64 = base64Encode(compressed);
+      final uid = _fbService.currentUserId;
+      if (uid != null) {
+        await _fbService.updateUserAvatar(uid, base64);
+        if (mounted) setState(() => _avatarBase64 = base64);
+      }
+    } finally {
+      if (mounted) setState(() => _isUploadingAvatar = false);
+    }
   }
 
   void _showEditProfileDialog() {
@@ -35,21 +67,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Edit Profile'),
+        title: const Text('Edit Display Name'),
         content: TextField(
           controller: nameController,
           decoration: const InputDecoration(
-            labelText: 'Display Name',
-            border: OutlineInputBorder(),
-          ),
+            labelText: 'Display Name', border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal, foregroundColor: Colors.white),
             onPressed: () async {
               final newName = nameController.text.trim();
               if (newName.isEmpty) return;
@@ -58,8 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               setState(() => _userName = newName);
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Profile updated successfully!')),
-              );
+                const SnackBar(content: Text('Profile updated successfully!')));
             },
             child: const Text('Save'),
           ),
@@ -76,7 +103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.edit),
-            tooltip: 'Edit Profile',
+            tooltip: 'Edit Name',
             onPressed: _showEditProfileDialog,
           ),
         ],
@@ -87,21 +114,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Center(
             child: Column(
               children: [
-                const CircleAvatar(
-                  radius: 50,
-                  backgroundColor: Colors.teal,
-                  child: Icon(Icons.person, size: 50, color: Colors.white),
+                Stack(
+                  children: [
+                    GestureDetector(
+                      onTap: _changeAvatar,
+                      child: CircleAvatar(
+                        radius: 50,
+                        backgroundColor: Colors.teal,
+                        backgroundImage: _avatarBase64 != null
+                            ? MemoryImage(base64Decode(_avatarBase64!))
+                            : null,
+                        child: _isUploadingAvatar
+                            ? const CircularProgressIndicator(color: Colors.white)
+                            : _avatarBase64 == null
+                                ? const Icon(Icons.person, size: 50, color: Colors.white)
+                                : null,
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: GestureDetector(
+                        onTap: _changeAvatar,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.teal,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 8),
+                const Text('Tap avatar to change photo',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
                 const SizedBox(height: 12),
-                Text(
-                  _userName,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
+                Text(_userName,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 Text(_userEmail, style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.edit, size: 16),
-                  label: const Text('Edit Profile'),
+                  label: const Text('Edit Name'),
                   onPressed: _showEditProfileDialog,
                 ),
               ],
@@ -113,13 +170,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             leading: const Icon(Icons.bookmark_border, color: Colors.teal),
             title: const Text('My Listed Items'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _navigateToProductList('My Listed Items', _fbService.getMyListedItems()),
+            onTap: () => _navigateToProductList(
+                'My Listed Items', _fbService.getMyListedItems()),
           ),
           ListTile(
             leading: const Icon(Icons.favorite_border, color: Colors.teal),
             title: const Text('My Favorites'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _navigateToProductList('My Favorites', _fbService.getMyFavorites()),
+            onTap: () => _navigateToProductList(
+                'My Favorites', _fbService.getMyFavorites()),
           ),
           ListTile(
             leading: const Icon(Icons.history, color: Colors.teal),
@@ -144,7 +203,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _navigateToProductList(String title, Future<List<Product>> dataFuture) {
     Navigator.push(context, MaterialPageRoute(
-      builder: (context) => _ProductListPage(title: title, dataFuture: dataFuture),
+      builder: (context) =>
+          _ProductListPage(title: title, dataFuture: dataFuture),
     ));
   }
 
@@ -182,17 +242,23 @@ class _ProductListPage extends StatelessWidget {
               final product = snapshot.data![index];
               return Card(
                 child: ListTile(
-                  leading: product.imagePath != null && product.imagePath!.isNotEmpty
+                  leading: product.imageBase64 != null && product.imageBase64!.isNotEmpty
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: Image.file(File(product.imagePath!), width: 50, height: 50, fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const Icon(Icons.shopping_bag, color: Colors.teal)),
+                          child: Image.memory(
+                            base64Decode(product.imageBase64!),
+                            width: 50, height: 50, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.shopping_bag, color: Colors.teal),
+                          ),
                         )
                       : const Icon(Icons.shopping_bag, color: Colors.teal),
-                  title: Text(product.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  title: Text(product.title,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('RM ${product.price.toStringAsFixed(2)}'),
                   trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () => Navigator.pushNamed(context, '/content', arguments: {'product': product}),
+                  onTap: () => Navigator.pushNamed(context, '/content',
+                      arguments: {'product': product}),
                 ),
               );
             },
@@ -223,11 +289,12 @@ class _BrowseHistoryPageState extends State<_BrowseHistoryPage> {
   }
 
   void _reload() => setState(() {
-    _historyFuture = widget.fbService.getBrowseHistory();
-  });
+        _historyFuture = widget.fbService.getBrowseHistory();
+      });
 
   String _formatTime(int ms) {
-    final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
+    final diff =
+        DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
     if (diff.inMinutes < 1) return 'Just now';
     if (diff.inHours < 1) return '${diff.inMinutes}m ago';
     if (diff.inDays < 1) return '${diff.inHours}h ago';
@@ -247,11 +314,16 @@ class _BrowseHistoryPageState extends State<_BrowseHistoryPage> {
                 context: context,
                 builder: (ctx) => AlertDialog(
                   title: const Text('Clear Browse History?'),
-                  content: const Text('All browsing records will be permanently removed.'),
+                  content: const Text(
+                      'All browsing records will be permanently removed.'),
                   actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                    TextButton(onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Clear', style: TextStyle(color: Colors.red))),
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel')),
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Clear',
+                            style: TextStyle(color: Colors.red))),
                   ],
                 ),
               );
@@ -276,7 +348,8 @@ class _BrowseHistoryPageState extends State<_BrowseHistoryPage> {
                 children: [
                   Icon(Icons.history, size: 60, color: Colors.grey),
                   SizedBox(height: 12),
-                  Text('No browse history yet.', style: TextStyle(color: Colors.grey)),
+                  Text('No browse history yet.',
+                      style: TextStyle(color: Colors.grey)),
                 ],
               ),
             );
@@ -286,33 +359,46 @@ class _BrowseHistoryPageState extends State<_BrowseHistoryPage> {
             itemCount: snapshot.data!.length,
             itemBuilder: (context, index) {
               final entry = snapshot.data![index];
-              final String? imagePath = entry['product_image_path'] as String?;
+              final String? imageBase64 =
+                  entry['product_image_base64'] as String?;
               final double price = (entry['product_price'] as num).toDouble();
               final int viewedAt = entry['viewed_at'] as int;
               return Card(
                 child: ListTile(
-                  leading: imagePath != null && imagePath.isNotEmpty
+                  leading: imageBase64 != null && imageBase64.isNotEmpty
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: Image.file(File(imagePath), width: 50, height: 50, fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const Icon(Icons.shopping_bag, color: Colors.teal)),
+                          child: Image.memory(
+                            base64Decode(imageBase64),
+                            width: 50, height: 50, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.shopping_bag, color: Colors.teal),
+                          ),
                         )
                       : const Icon(Icons.shopping_bag, color: Colors.teal),
                   title: Text(entry['product_title'] as String,
-                    style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                   subtitle: Text('RM ${price.toStringAsFixed(2)}'),
-                  trailing: Text(_formatTime(viewedAt), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  trailing: Text(_formatTime(viewedAt),
+                      style:
+                          const TextStyle(color: Colors.grey, fontSize: 12)),
                   onTap: () async {
                     final String productId = entry['product_id'] as String;
                     final products = await widget.fbService.getProducts();
-                    final Product? product = products.where((p) => p.firestoreId == productId).firstOrNull;
+                    final Product? product = products
+                        .where((p) => p.firestoreId == productId)
+                        .firstOrNull;
                     if (!mounted) return;
                     if (product != null) {
-                      await Navigator.pushNamed(context, '/content', arguments: {'product': product});
+                      await Navigator.pushNamed(context, '/content',
+                          arguments: {'product': product});
                       _reload();
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('This item has been removed.')));
+                          const SnackBar(
+                              content: Text('This item has been removed.')));
                     }
                   },
                 ),

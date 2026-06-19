@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/firebase_service.dart';
 import '../models/product_model.dart';
@@ -13,17 +13,42 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final FirebaseService _fbService = FirebaseService();
   final TextEditingController _searchController = TextEditingController();
-
   String _searchKeyword = '';
+  late Future<List<Product>> _productsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _productsFuture = _fbService.getProducts();
+  }
 
   void _refreshProducts() {
-    setState(() {});
+    setState(() {
+      _productsFuture = _searchKeyword.isEmpty
+          ? _fbService.getProducts()
+          : _fbService.searchProducts(_searchKeyword);
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Widget _buildProductImage(Product item) {
+    if (item.imageBase64 != null && item.imageBase64!.isNotEmpty) {
+      return Image.memory(
+        base64Decode(item.imageBase64!),
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: 100,
+        errorBuilder: (_, __, ___) =>
+            const Center(child: Icon(Icons.shopping_bag, size: 40, color: Colors.teal)),
+      );
+    }
+    return const Center(
+        child: Icon(Icons.shopping_bag, size: 40, color: Colors.teal));
   }
 
   @override
@@ -42,10 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
         currentIndex: 0,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Market'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
           BottomNavigationBarItem(icon: Icon(Icons.help), label: 'Help'),
         ],
         onTap: (index) {
@@ -69,16 +91,15 @@ class _HomeScreenState extends State<HomeScreen> {
                           _searchController.clear();
                           setState(() {
                             _searchKeyword = '';
+                            _productsFuture = _fbService.getProducts();
                           });
                         },
                       )
                     : null,
                 filled: true,
                 fillColor: Colors.grey.shade100,
-                contentPadding: const EdgeInsets.symmetric(
-                  vertical: 0,
-                  horizontal: 16,
-                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -87,15 +108,16 @@ class _HomeScreenState extends State<HomeScreen> {
               onChanged: (value) {
                 setState(() {
                   _searchKeyword = value.trim();
+                  _productsFuture = _searchKeyword.isEmpty
+                      ? _fbService.getProducts()
+                      : _fbService.searchProducts(_searchKeyword);
                 });
               },
             ),
           ),
           Expanded(
             child: FutureBuilder<List<Product>>(
-              future: _searchKeyword.isEmpty
-                  ? _fbService.getProducts()
-                  : _fbService.searchProducts(_searchKeyword),
+              future: _productsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -103,18 +125,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (!snapshot.hasData || snapshot.data!.isEmpty) {
                   return const Center(child: Text('No matching items found.'));
                 }
-
                 final products = snapshot.data!;
                 return Padding(
                   padding: const EdgeInsets.all(8.0),
                   child: GridView.builder(
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          childAspectRatio: 0.73,
-                          crossAxisSpacing: 8.0,
-                          mainAxisSpacing: 8.0,
-                        ),
+                      crossAxisCount: 2,
+                      childAspectRatio: 0.73,
+                      crossAxisSpacing: 8.0,
+                      mainAxisSpacing: 8.0,
+                    ),
                     itemCount: products.length,
                     itemBuilder: (context, index) {
                       final item = products[index];
@@ -140,18 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 height: 100,
                                 width: double.infinity,
                                 color: Colors.teal.shade50,
-                                child: item.imagePath != null
-                                    ? Image.file(
-                                        File(item.imagePath!),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : const Center(
-                                        child: Icon(
-                                          Icons.shopping_bag,
-                                          size: 40,
-                                          color: Colors.teal,
-                                        ),
-                                      ),
+                                child: _buildProductImage(item),
                               ),
                               Padding(
                                 padding: const EdgeInsets.all(8.0),
@@ -161,9 +171,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     Text(
                                       item.title,
                                       style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15,
-                                      ),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -178,17 +187,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                     const SizedBox(height: 6),
                                     const Divider(
-                                      height: 1,
-                                      color: Colors.black12,
-                                    ),
+                                        height: 1, color: Colors.black12),
                                     const SizedBox(height: 6),
                                     Row(
                                       children: [
-                                        const Icon(
-                                          Icons.account_circle,
-                                          size: 14,
-                                          color: Colors.teal,
-                                        ),
+                                        const Icon(Icons.account_circle,
+                                            size: 14, color: Colors.teal),
                                         const SizedBox(width: 4),
                                         Expanded(
                                           child: Text(
